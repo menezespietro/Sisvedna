@@ -1,201 +1,166 @@
-from flask import Flask, request, jsonify
-from database import init_db
-from models import Produto, Cliente, Venda
+import sqlite3
+import os
 
-app = Flask(__name__)
+# --- FUNÇÕES DE BANCO DE DADOS ---
+def conectar():
+    return sqlite3.connect('database.db')
 
-# Inicializa o banco de dados
-init_db()
-
-# Rotas para Produtos
-@app.route('/produtos', methods=['GET'])
-def listar_produtos():
-    """Lista todos os produtos"""
-    produtos = Produto.get_all()
-    return jsonify([dict(produto) for produto in produtos])
-
-@app.route('/produtos/<int:id>', methods=['GET'])
-def obter_produto(id):
-    """Obtém um produto específico"""
-    produto = Produto.get_by_id(id)
-    if produto:
-        return jsonify(dict(produto))
-    return jsonify({'erro': 'Produto não encontrado'}), 404
-
-@app.route('/produtos', methods=['POST'])
-def criar_produto():
-    """Cria um novo produto"""
-    data = request.json
-    required_fields = ['nome', 'preco', 'estoque']
+def inicializar_banco():
+    conn = conectar()
+    cursor = conn.cursor()
     
-    if not all(field in data for field in required_fields):
-        return jsonify({'erro': 'Campos obrigatórios faltando'}), 400
+    # Criar tabelas
+    cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        usuario TEXT UNIQUE,
+                        senha TEXT)''')
     
-    produto_id = Produto.create(
-        data['nome'],
-        data.get('descricao', ''),
-        float(data['preco']),
-        int(data['estoque'])
-    )
+    cursor.execute('''CREATE TABLE IF NOT EXISTS clientes (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        nome TEXT,
+                        cpf TEXT UNIQUE)''')
     
-    return jsonify({'id': produto_id, 'mensagem': 'Produto criado com sucesso'}), 201
-
-@app.route('/produtos/<int:id>', methods=['PUT'])
-def atualizar_produto(id):
-    """Atualiza um produto"""
-    data = request.json
-    sucesso = Produto.update(
-        id,
-        data['nome'],
-        data.get('descricao', ''),
-        float(data['preco']),
-        int(data['estoque'])
-    )
+    cursor.execute('''CREATE TABLE IF NOT EXISTS produtos (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        nome TEXT,
+                        preco REAL,
+                        estoque INTEGER)''')
     
-    if sucesso:
-        return jsonify({'mensagem': 'Produto atualizado com sucesso'})
-    return jsonify({'erro': 'Produto não encontrado'}), 404
-
-@app.route('/produtos/<int:id>', methods=['DELETE'])
-def deletar_produto(id):
-    """Deleta um produto"""
-    sucesso = Produto.delete(id)
-    if sucesso:
-        return jsonify({'mensagem': 'Produto deletado com sucesso'})
-    return jsonify({'erro': 'Produto não encontrado'}), 404
-
-# Rotas para Clientes
-@app.route('/clientes', methods=['GET'])
-def listar_clientes():
-    """Lista todos os clientes"""
-    clientes = Cliente.get_all()
-    return jsonify([dict(cliente) for cliente in clientes])
-
-@app.route('/clientes/<int:id>', methods=['GET'])
-def obter_cliente(id):
-    """Obtém um cliente específico"""
-    cliente = Cliente.get_by_id(id)
-    if cliente:
-        return jsonify(dict(cliente))
-    return jsonify({'erro': 'Cliente não encontrado'}), 404
-
-@app.route('/clientes', methods=['POST'])
-def criar_cliente():
-    """Cria um novo cliente"""
-    data = request.json
-    if 'nome' not in data:
-        return jsonify({'erro': 'Campo nome é obrigatório'}), 400
+    cursor.execute('''CREATE TABLE IF NOT EXISTS vendas (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        id_produto INTEGER,
+                        id_cliente INTEGER,
+                        quantidade INTEGER,
+                        total REAL,
+                        data TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(id_produto) REFERENCES produtos(id),
+                        FOREIGN KEY(id_cliente) REFERENCES clientes(id))''')
     
-    cliente_id = Cliente.create(
-        data['nome'],
-        data.get('email', ''),
-        data.get('telefone', ''),
-        data.get('endereco', '')
-    )
+    # Criar um usuário padrão se a tabela estiver vazia
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO usuarios (usuario, senha) VALUES ('admin', 'admin123')")
     
-    return jsonify({'id': cliente_id, 'mensagem': 'Cliente criado com sucesso'}), 201
+    conn.commit()
+    conn.close()
 
-@app.route('/clientes/<int:id>', methods=['PUT'])
-def atualizar_cliente(id):
-    """Atualiza um cliente"""
-    data = request.json
-    sucesso = Cliente.update(
-        id,
-        data['nome'],
-        data.get('email', ''),
-        data.get('telefone', ''),
-        data.get('endereco', '')
-    )
-    
-    if sucesso:
-        return jsonify({'mensagem': 'Cliente atualizado com sucesso'})
-    return jsonify({'erro': 'Cliente não encontrado'}), 404
+# --- MÓDULOS DO SISTEMA ---
 
-@app.route('/clientes/<int:id>', methods=['DELETE'])
-def deletar_cliente(id):
-    """Deleta um cliente"""
-    sucesso = Cliente.delete(id)
-    if sucesso:
-        return jsonify({'mensagem': 'Cliente deletado com sucesso'})
-    return jsonify({'erro': 'Cliente não encontrado'}), 404
+def tela_login():
+    print("\n" + "="*30)
+    print("      SISVENDA - LOGIN")
+    print("="*30)
+    usuario = input("Usuário: ")
+    senha = input("Senha: ")
+    
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM usuarios WHERE usuario = ? AND senha = ?", (usuario, senha))
+    usuario_logado = cursor.fetchone()
+    conn.close()
+    
+    return usuario_logado
 
-# Rotas para Vendas
-@app.route('/vendas', methods=['GET'])
-def listar_vendas():
-    """Lista todas as vendas"""
-    vendas = Venda.get_all()
-    return jsonify([dict(venda) for venda in vendas])
+def modulo_clientes():
+    print("\n--- CADASTRO DE CLIENTES ---")
+    nome = input("Nome completo: ")
+    cpf = input("CPF: ")
+    try:
+        conn = conectar()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO clientes (nome, cpf) VALUES (?, ?)", (nome, cpf))
+        conn.commit()
+        print("✔ Cliente cadastrado com sucesso!")
+    except sqlite3.IntegrityError:
+        print("✖ Erro: Este CPF já está cadastrado.")
+    finally:
+        conn.close()
 
-@app.route('/vendas/<int:id>', methods=['GET'])
-def obter_venda(id):
-    """Obtém uma venda específica com seus itens"""
-    venda = Venda.get_by_id(id)
-    if not venda:
-        return jsonify({'erro': 'Venda não encontrada'}), 404
+def modulo_produtos():
+    print("\n--- CADASTRO DE PRODUTOS ---")
+    nome = input("Nome do produto: ")
+    preco = float(input("Preço unitário: "))
+    estoque = int(input("Quantidade em estoque: "))
     
-    itens = Venda.get_itens(id)
-    venda_dict = dict(venda)
-    venda_dict['itens'] = [dict(item) for item in itens]
-    
-    return jsonify(venda_dict)
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO produtos (nome, preco, estoque) VALUES (?, ?, ?)", (nome, preco, estoque))
+    conn.commit()
+    conn.close()
+    print("✔ Produto cadastrado!")
 
-@app.route('/vendas', methods=['POST'])
-def criar_venda():
-    """Cria uma nova venda"""
-    data = request.json
+def modulo_vendas():
+    print("\n--- NOVA VENDA ---")
+    conn = conectar()
+    cursor = conn.cursor()
     
-    if 'itens' not in data or not data['itens']:
-        return jsonify({'erro': 'Lista de itens é obrigatória'}), 400
+    # Listar produtos disponíveis
+    cursor.execute("SELECT id, nome, preco, estoque FROM produtos WHERE estoque > 0")
+    produtos = cursor.fetchall()
     
-    # Valida e processa os itens
-    itens = []
-    for item in data['itens']:
-        if 'produto_id' not in item or 'quantidade' not in item:
-            return jsonify({'erro': 'Cada item deve ter produto_id e quantidade'}), 400
-        
-        # Obtém o produto para pegar o preço
-        produto = Produto.get_by_id(item['produto_id'])
-        if not produto:
-            return jsonify({'erro': f'Produto {item["produto_id"]} não encontrado'}), 404
-        
-        itens.append({
-            'produto_id': item['produto_id'],
-            'quantidade': item['quantidade'],
-            'preco_unitario': produto['preco']
-        })
+    if not produtos:
+        print("Não há produtos em estoque.")
+        return
+
+    print("Produtos Disponíveis:")
+    for p in produtos:
+        print(f"ID: {p[0]} | {p[1]} | R$ {p[2]:.22} | Estoque: {p[3]}")
     
     try:
-        venda_id = Venda.create(data.get('cliente_id'), itens)
-        return jsonify({'id': venda_id, 'mensagem': 'Venda realizada com sucesso'}), 201
-    except Exception as e:
-        return jsonify({'erro': f'Erro ao processar venda: {str(e)}'}), 400
+        id_prod = int(input("\nDigite o ID do produto: "))
+        id_cli = int(input("Digite o ID do cliente: "))
+        qtd = int(input("Quantidade: "))
+        
+        # Verificar produto e estoque
+        cursor.execute("SELECT preco, estoque FROM produtos WHERE id = ?", (id_prod,))
+        prod_data = cursor.fetchone()
+        
+        if prod_data and prod_data[1] >= qtd:
+            total = prod_data[0] * qtd
+            cursor.execute("INSERT INTO vendas (id_produto, id_cliente, quantidade, total) VALUES (?, ?, ?, ?)",
+                           (id_prod, id_cli, qtd, total))
+            cursor.execute("UPDATE produtos SET estoque = estoque - ? WHERE id = ?", (qtd, id_prod))
+            conn.commit()
+            print(f"✔ Venda finalizada! Total: R$ {total:.2f}")
+        else:
+            print("✖ Venda cancelada: Produto não encontrado ou estoque insuficiente.")
+    except ValueError:
+        print("✖ Erro: Digite apenas números para IDs e Quantidade.")
+    finally:
+        conn.close()
 
-@app.route('/vendas/<int:id>/status', methods=['PATCH'])
-def atualizar_status_venda(id):
-    """Atualiza o status de uma venda"""
-    data = request.json
-    if 'status' not in data:
-        return jsonify({'erro': 'Campo status é obrigatório'}), 400
-    
-    sucesso = Venda.update_status(id, data['status'])
-    if sucesso:
-        return jsonify({'mensagem': 'Status atualizado com sucesso'})
-    return jsonify({'erro': 'Venda não encontrada'}), 404
+# --- LOOP PRINCIPAL ---
 
-# Rotas de relatório
-@app.route('/relatorio/vendas', methods=['GET'])
-def relatorio_vendas():
-    """Gera um relatório simples de vendas"""
-    vendas = Venda.get_all()
+def menu_principal():
+    inicializar_banco()
     
-    total_vendas = len(vendas)
-    valor_total = sum(venda['total'] for venda in vendas)
-    
-    return jsonify({
-        'total_vendas': total_vendas,
-        'valor_total': valor_total,
-        'vendas': [dict(venda) for venda in vendas]
-    })
+    usuario = tela_login()
+    if not usuario:
+        print("Acesso Negado!")
+        return
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    while True:
+        print("\n" + "-"*30)
+        print(f" BEM-VINDO AO SISVENDA")
+        print("-"*30)
+        print("1. Cadastrar Cliente")
+        print("2. Cadastrar Produto")
+        print("3. Realizar Venda")
+        print("4. Sair")
+        
+        opcao = input("\nEscolha uma opção: ")
+        
+        if opcao == '1':
+            modulo_clientes()
+        elif opcao == '2':
+            modulo_produtos()
+        elif opcao == '3':
+            modulo_vendas()
+        elif opcao == '4':
+            print("Saindo do sistema...")
+            break
+        else:
+            print("Opção inválida!")
+
+if __name__ == "__main__":
+    menu_principal()
